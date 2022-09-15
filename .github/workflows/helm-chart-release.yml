@@ -1,0 +1,64 @@
+name: helm chart release
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  helm_chart_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set Variables
+        run: |
+          echo "KAFKA_BITNAMI_PATH=$GITHUB_WORKSPACE/temp/bitnami/kafka" >> $GITHUB_ENV
+          echo "KAFKA_RELEASE_PATH=$GITHUB_WORKSPACE/main/helm-charts/lolo/kafka" >> $GITHUB_ENV
+      # Fetch Helm Chart from another repo
+      - uses: actions/checkout@v3
+        with:
+          repository: 'lolocompany/bitnami_charts'
+          path: ./temp
+
+      - uses: actions/checkout@v3
+        with:
+          path: ./main
+
+      - uses: azure/setup-helm@v3
+        with:
+          version: '3.9.0'
+
+      - name: Prepare Kafka Helm Chart
+        run: |
+          ls -la .
+          ls -la ./main
+          echo $GITHUB_WORKSPACE
+          cd ${{ env.KAFKA_BITNAMI_PATH }}
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm dependency build .
+          helm lint .
+          helm package .
+          helm repo index .
+          mkdir -p ${{ env.KAFKA_RELEASE_PATH }}
+          cp ${{ env.KAFKA_BITNAMI_PATH }}/kafka-*.tgz ${{ env.KAFKA_RELEASE_PATH }}
+          cp ${{ env.KAFKA_BITNAMI_PATH }}/index.yaml ${{ env.KAFKA_RELEASE_PATH }}
+
+      - name: Diff
+        id: diff
+        run: |
+          cd ${{ env.KAFKA_RELEASE_PATH }}
+          git add -N ${{ env.KAFKA_RELEASE_PATH }}
+          git diff --name-only --exit-code
+        continue-on-error: true
+
+      - name: Commit & Push
+        run: |
+          set -x
+          cd ${{ env.KAFKA_RELEASE_PATH }}
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ${{ env.KAFKA_RELEASE_PATH }}
+          git commit -m 'generated'
+          SHA=`git rev-parse HEAD`
+          BRANCH_NAME="helm-release-${SHA:0:7}"
+          git checkout -b $BRANCH_NAME
+          git push --set-upstream origin $BRANCH_NAME
+        if: steps.diff.outcome == 'failure'
